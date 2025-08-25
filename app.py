@@ -18,9 +18,12 @@ async def mcp_handler(request: Request):
                 "protocolVersion": "2025-06-18",
                 "capabilities": {
                     "tools": {"listChanged": True},
-                    "resources": {}
                 },
-                "serverInfo": {"name": "mcp-demo", "version": "1.0.0"}
+                "resources": {}
+            },
+            "serverInfo": {
+                "name": "mcp-demo",
+                "version": "1.0.0"
             }
         }
 
@@ -32,41 +35,42 @@ async def mcp_handler(request: Request):
             "result": {
                 "tools": [
                     {
-                        "name": "echo",
-                        "title": "Echo Tool",
-                        "description": "Repeats back the text you provide.",
-                        "inputSchema": {
+                        "name": "HelloWorld",
+                        "description": "Returns a friendly hello message",
+                        "input_schema": {
                             "type": "object",
                             "properties": {
-                                "text": {
-                                    "type": "string",
-                                    "description": "The text to echo back"
-                                }
+                                "name": {"type": "string"}
                             },
-                            "required": ["text"]
+                            "required": ["name"]
                         }
                     }
                 ]
             }
         }
 
-    # Handle tools/call
+    # Handle tools/call (when Copilot tries to use HelloWorld)
     if method == "tools/call":
         params = body.get("params", {})
         tool_name = params.get("name")
-        args = params.get("arguments", {})
+        arguments = params.get("arguments", {})
 
-        if tool_name == "echo":
-            text = args.get("text", "")
+        if tool_name == "HelloWorld":
+            user_name = arguments.get("name", "stranger")
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "content": [
-                        {"type": "text", "text": f"You said: {text}"}
-                    ]
+                    "output": f"Hello, {user_name}! 👋"
                 }
             }
 
-    # Fallback
-    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found"}}
+    # Default if method not recognized
+    return JSONResponse(
+        content={
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {"code": -32601, "message": "Method not found"}
+        },
+        status_code=200
+    )
