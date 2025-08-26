@@ -1,89 +1,123 @@
-from fastapi import FastAPI, Request
+import os
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
+from azure.storage.blob import BlobServiceClient
 
 app = FastAPI()
 
+# --- Storage client (use either connection string or SAS) ---
+# Prefer using a Managed Identity in production, but this keeps it simple:
+CONN_STR = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
+if not CONN_STR:
+    raise RuntimeError("Set AZURE_STORAGE_CONNECTION_STRING for the app.")
 
-@app.get("/")
-def health():
-    return {"ok": True}
+blob_service = BlobServiceClient.from_connection_string(CONN_STR)
 
+# ---------------- MCP CONTRACT ----------------
+# POST /mcp accepts JSON-RPC 2.0 messages. We present a single "AzureStorage" tool
+# but ALSO expose a more AI-friendly "action" | "container" | "blob" | "content".
 
 @app.post("/mcp")
-async def mcp_handler(request: Request):
-    body = await request.json()
+async def mcp_handler(req: Request):
+    body = await req.json()
     method = body.get("method")
     req_id = body.get("id")
 
-    # ---- tiny helper for consistent replies ----
-    def ok(result: dict):
-        return {"jsonrpc": "2.0", "id": req_id, "result": result}
-
-    def err(code: int, message: str):
-        # JSON-RPC error object
-        return JSONResponse(
-            content={"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}},
-            status_code=200,
-        )
-
-    # --------- initialize ----------
+    # 1) initialize
     if method == "initialize":
-        return ok({
-            "protocolVersion": "2025-06-18",
-            "capabilities": {"tools": {"listChanged": True}},
-            "resources": {}
-        }) | {"serverInfo": {"name": "mcp-demo", "version": "1.0.0"}}
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {"tools": {"listChanged": True}},
+                "resources": {}
+            },
+            "serverInfo": {"name": "azure-storage-mcp", "version": "1.0.0"}
+        }
 
-    # --------- tools/list ----------
+    # 2) tools/list
     if method == "tools/list":
-        return ok({
-            "tools": [
-                {
-                    "name": "HelloWorld",
-                    "description": "Returns a friendly hello message",
-                    "inputSchema": {                    # camelCase
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string", "description": "Name to greet"}
-                        },
-                        "required": ["name"]
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "tools": [
+                    {
+                        "name": "AzureStorage",
+                        "description": "Create, read, update and delete blobs in Azure Storage.",
+                        # IMPORTANT: use inputSchema with clear properties so Copilot can map inputs
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "action": {
+                                    "type": "string",
+                                    "enum": ["uploadBlob", "getBlob", "deleteBlob", "updateBlob"],
+                                    "description": "Which operation to perform."
+                                },
+                                "container": {"type": "string", "description": "Container name."},
+                                "blob": {"type": "string", "description": "Blob name (path)."},
+                                "content": {
+                                    "type": "string",
+                                    "description": "Text content for upload/update."
+                                }
+                            },
+                            "required": ["action", "container", "blob"]
+                        }
                     }
-                },
-                {
-                    "name": "echo",
-                    "description": "Repeats back the text you provide.",
-                    "inputSchema": {                    # camelCase
-                        "type": "object",
-                        "properties": {
-                            "text": {"type": "string", "description": "The text to echo back"}
-                        },
-                        "required": ["text"]
-                    }
-                }
-            ]
-        })
+                ]
+            }
+        }
 
-    # --------- tools/call ----------
+    # 3) tools/call
     if method == "tools/call":
-        params = body.get("params", {}) or {}
-        tool_name_raw = params.get("name") or ""
-        arguments = params.get("arguments", {}) or {}
+        params = body.get("params", {})
+        tool_name = params.get("name")
+        args = params.get("arguments", {})
 
-        # normalize name to be lenient
-        tool_name = tool_name_raw.strip().lower()
+        if tool_name != "AzureStorage":
+            return _rpc_error(req_id, -32601, "Unknown tool")
 
-        # HelloWorld
-        if tool_name == "helloworld":
-            user_name = str(arguments.get("name", "stranger"))
-            return ok({"output": f"Hello, {user_name}! 👋"})
+        action = (args.get("action") or "").lower()
+        container = args.get("container")
+        blob = args.get("blob")
+        content = args.get("content", "")
 
-        # echo
-        if tool_name == "echo":
-            text = str(arguments.get("text", ""))
-            return ok({"output": text})
+        if not (action and container and blob):
+            return _rpc_error(req_id, -32602, "Missing required fields.")
 
-        # known method, unknown tool
-        return err(-32602, f"Unknown tool '{tool_name_raw}'. Try 'HelloWorld' or 'echo'.")
+        try:
+            container_client = blob_service.get_container_client(container)
 
-    # --------- anything else ----------
-    return err(-32601, "Method not found")
+            if action == "uploadBlob":
+                container_client.upload_blob(name=blob, data=content.encode("utf-8"), overwrite=False)
+                return _ok(req_id, {"message": f"Uploaded '{blob}' to '{container}'."})
+
+            if action == "getBlob":
+                downloader = container_client.download_blob(blob)
+                text = downloader.readall().decode("utf-8")
+                return _ok(req_id, {"content": text})
+
+            if action == "deleteBlob":
+                container_client.delete_blob(blob)
+                return _ok(req_id, {"message": f"Deleted '{blob}'."})
+
+            if action == "updateBlob":
+                # overwrite existing
+                container_client.upload_blob(name=blob, data=content.encode("utf-8"), overwrite=True)
+                return _ok(req_id, {"message": f"Updated '{blob}'."})
+
+            return _rpc_error(req_id, -32602, "Unsupported action.")
+
+        except Exception as e:
+            return _rpc_error(req_id, 500, f"Storage error: {e}")
+
+    # Default
+    return _rpc_error(req_id, -32601, "Method not found")
+
+
+def _ok(req_id, result):
+    return {"jsonrpc": "2.0", "id": req_id, "result": result}
+
+def _rpc_error(req_id, code, msg):
+    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": msg}}
