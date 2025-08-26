@@ -47,94 +47,85 @@ async def mcp_handler(request: Request):
         }
 
     # 2) tools/list
-    if method == "tools/list":
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": {
-                "tools": [
-                    {
-                        "name": "HelloWorld",
-                        "description": "Returns a friendly hello message",
-                        "input_schema": {
-                            "type": "object",
-                            "properties": {"name": {"type": "string"}},
-                            "required": ["name"],
-                        },
+if method == "tools/list":
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "result": {
+            "tools": [
+                {
+                    "name": "HelloWorld",
+                    "description": "Returns a friendly hello message",
+                    "inputSchema": {              # <-- was input_schema
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                        "required": ["name"],
                     },
-                    {
-                        "name": "echo",
-                        "description": "Repeats back the text you provide.",
-                        "input_schema": {
-                            "type": "object",
-                            "properties": {"text": {"type": "string"}},
-                            "required": ["text"],
-                        },
+                },
+                {
+                    "name": "echo",
+                    "description": "Repeats back the text you provide.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"text": {"type": "string"}},
+                        "required": ["text"],
                     },
-                    {
-                        "name": "blobList",
-                        "description": "List blobs in a container (optional prefix).",
-                        "input_schema": {
-                            "type": "object",
-                            "properties": {
-                                "container": {
-                                    "type": "string",
-                                    "description": "Container name (default from env).",
-                                },
-                                "prefix": {
-                                    "type": "string",
-                                    "description": "Optional name prefix filter.",
-                                },
-                            },
-                            "required": [],
+                },
+                {
+                    "name": "blobList",
+                    "description": "List blobs in a container (optional prefix).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "container": {"type": "string", "description": "Container name (default from env)."},
+                            "prefix": {"type": "string", "description": "Optional name prefix filter."},
                         },
+                        "required": [],
                     },
-                    {
-                        "name": "blobReadText",
-                        "description": "Read a text blob from a container.",
-                        "input_schema": {
-                            "type": "object",
-                            "properties": {
-                                "container": {"type": "string"},
-                                "blob": {"type": "string"},
-                                "encoding": {
-                                    "type": "string",
-                                    "description": "e.g. utf-8",
-                                    "default": "utf-8",
-                                },
-                            },
-                            "required": ["blob"],
+                },
+                {
+                    "name": "blobReadText",
+                    "description": "Read a text blob from a container.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "container": {"type": "string"},
+                            "blob": {"type": "string"},
+                            "encoding": {"type": "string", "description": "e.g. utf-8", "default": "utf-8"},
                         },
+                        "required": ["blob"],
                     },
-                    {
-                        "name": "blobWriteText",
-                        "description": "Create or overwrite a text blob.",
-                        "input_schema": {
-                            "type": "object",
-                            "properties": {
-                                "container": {"type": "string"},
-                                "blob": {"type": "string"},
-                                "text": {"type": "string"},
-                                "encoding": {"type": "string", "default": "utf-8"},
-                            },
-                            "required": ["blob", "text"],
+                },
+                {
+                    "name": "blobWriteText",
+                    "description": "Create or overwrite a text blob.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "container": {"type": "string"},
+                            "blob": {"type": "string"},
+                            "text": {"type": "string"},
+                            "encoding": {"type": "string", "default": "utf-8"},
                         },
+                        "required": ["blob", "text"],
                     },
-                    {
-                        "name": "blobDelete",
-                        "description": "Delete a blob.",
-                        "input_schema": {
-                            "type": "object",
-                            "properties": {
-                                "container": {"type": "string"},
-                                "blob": {"type": "string"},
-                            },
-                            "required": ["blob"],
+                },
+                {
+                    "name": "blobDelete",
+                    "description": "Delete a blob.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "container": {"type": "string"},
+                            "blob": {"type": "string"},
                         },
+                        "required": ["blob"],
                     },
-                ]
-            },
-        }
+                },
+            ]
+        },
+    }
+
 
     # 3) tools/call
     if method == "tools/call":
@@ -205,3 +196,4 @@ async def mcp_handler(request: Request):
         status_code=200,
         content={"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found"}},
     )
+
